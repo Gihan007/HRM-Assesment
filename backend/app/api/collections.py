@@ -16,16 +16,9 @@ from fastapi import APIRouter, File, HTTPException, UploadFile, status
 
 from app.agent.graph import answer_query
 from app.core.config import get_settings
-from app.ingestion.chunker import chunk_document
-from app.ingestion.loaders import (
-    DocumentLoadError,
-    EmptyDocumentError,
-    UnsupportedFileTypeError,
-    compute_file_hash,
-    load_document,
-)
+from app.ingestion.loaders import compute_file_hash
+from app.ingestion.pipeline import ingest_file
 from app.retrieval import weaviate_client as vector_store
-from app.retrieval.weaviate_client import VectorStoreError
 from app.schemas.api import (
     CollectionCreateRequest,
     CollectionResponse,
@@ -109,56 +102,37 @@ async def upload_documents(
 
     for upload in files:
         original_filename = upload.filename or "unnamed"
-        try:
-            content = await upload.read()
+        content = await upload.read()
 
-            if len(content) > max_bytes:
-                size_mb = len(content) / (1024 * 1024)
-                results.append(
-                    DocumentUploadResult(
-                        filename=original_filename,
-                        success=False,
-                        error=(
-                            f"File too large ({size_mb:.1f} MB); "
-                            f"limit is {settings.max_upload_mb} MB."
-                        ),
-                    )
-                )
-                continue
-
-            doc_id = compute_file_hash(content)
-            suffix = Path(original_filename).suffix
-            stored_path = upload_dir / f"{doc_id}{suffix}"
-            stored_path.write_bytes(content)
-
-            document = load_document(stored_path)
-            document.filename = original_filename  # not the on-disk hashed name
-            chunks = chunk_document(
-                document,
-                doc_id=doc_id,
-                chunk_size=settings.chunk_size_tokens,
-                chunk_overlap=settings.chunk_overlap_tokens,
-            )
-
-            add_result = vector_store.add_documents(name, chunks)
-
+        if len(content) > max_bytes:
+            size_mb = len(content) / (1024 * 1024)
             results.append(
                 DocumentUploadResult(
                     filename=original_filename,
-                    success=True,
-                    skipped=add_result.skipped,
-                    doc_id=doc_id,
-                    chunk_count=len(chunks),
+                    success=False,
+                    error=(
+                        f"File too large ({size_mb:.1f} MB); limit is {settings.max_upload_mb} MB."
+                    ),
                 )
             )
-        except (UnsupportedFileTypeError, DocumentLoadError, EmptyDocumentError) as exc:
-            results.append(
-                DocumentUploadResult(filename=original_filename, success=False, error=str(exc))
+            continue
+
+        suffix = Path(original_filename).suffix
+        stored_path = upload_dir / f"{compute_file_hash(content)}{suffix}"
+        stored_path.write_bytes(content)
+
+        ingest_result = ingest_file(name, stored_path, original_filename=original_filename)
+
+        results.append(
+            DocumentUploadResult(
+                filename=ingest_result.filename,
+                success=ingest_result.success,
+                skipped=ingest_result.skipped,
+                doc_id=ingest_result.doc_id,
+                chunk_count=ingest_result.chunk_count,
+                error=ingest_result.error,
             )
-        except VectorStoreError as exc:
-            results.append(
-                DocumentUploadResult(filename=original_filename, success=False, error=str(exc))
-            )
+        )
 
     return DocumentUploadResponse(results=results)
 

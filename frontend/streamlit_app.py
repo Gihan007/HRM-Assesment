@@ -69,11 +69,13 @@ with st.sidebar:
     if collection_names:
         counts = {c["name"]: c["document_count"] for c in collections}
         labels = [f"{name} ({counts[name]} docs)" for name in collection_names]
-        default_index = (
-            collection_names.index(st.session_state.selected_collection)
-            if st.session_state.selected_collection in collection_names
-            else 0
-        )
+        if st.session_state.selected_collection in collection_names:
+            default_index = collection_names.index(st.session_state.selected_collection)
+        else:
+            # Default to the seeded sample-papers collection (see
+            # scripts/seed_samples.py) when nothing's been picked yet.
+            preferred = next((n for n in collection_names if n.lower() == "ai_papers"), None)
+            default_index = collection_names.index(preferred) if preferred else 0
         chosen_label = st.radio("Select a collection", labels, index=default_index)
         selected = collection_names[labels.index(chosen_label)]
         st.session_state.selected_collection = selected
