@@ -32,6 +32,11 @@ class Settings(BaseSettings):
     hybrid_alpha: float = 0.5
     query_expansion_variants: int = 2
     enable_query_expansion: bool = True
+    # Grounding gate for the (pre-rerank) query pipeline: below this best-chunk
+    # similarity score, the LLM is skipped entirely and a fixed "not found in
+    # the documents" response is returned. Superseded by rerank_threshold once
+    # the full hybrid+rerank pipeline is in place.
+    similarity_threshold: float = 0.35
 
     # --- Chunking ---
     chunk_size_tokens: int = 800
