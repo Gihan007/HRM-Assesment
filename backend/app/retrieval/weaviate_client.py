@@ -54,6 +54,13 @@ class AddDocumentsResult:
     skipped: bool  # True when doc_id already existed and nothing was inserted
 
 
+@dataclass
+class DocumentSummary:
+    doc_id: str
+    filename: str
+    chunk_count: int
+
+
 _client: WeaviateClient | None = None
 
 
@@ -141,6 +148,11 @@ def list_collections() -> list[str]:
     return sorted(client.collections.list_all(simple=True).keys())
 
 
+def collection_exists(name: str) -> bool:
+    sanitized = sanitize_collection_name(name)
+    return get_client().collections.exists(sanitized)
+
+
 def delete_collection(name: str) -> None:
     """Delete a collection if it exists. Idempotent (no error if missing)."""
     sanitized = sanitize_collection_name(name)
@@ -221,6 +233,30 @@ def add_documents(
         inserted += len(objects)
 
     return AddDocumentsResult(inserted_count=inserted, skipped=False)
+
+
+def list_documents(collection: str) -> list[DocumentSummary]:
+    """Return one summary per distinct file ingested into `collection`
+    (grouped by doc_id), each with its chunk count. Raises
+    `VectorStoreError` if the collection doesn't exist.
+    """
+    sanitized = sanitize_collection_name(collection)
+    client = get_client()
+    if not client.collections.exists(sanitized):
+        raise VectorStoreError(f"Collection '{sanitized}' does not exist.")
+
+    coll = client.collections.get(sanitized)
+
+    by_doc_id: dict[str, DocumentSummary] = {}
+    for obj in coll.iterator(return_properties=["doc_id", "filename"]):
+        doc_id = obj.properties.get("doc_id", "")
+        filename = obj.properties.get("filename", "")
+        if doc_id in by_doc_id:
+            by_doc_id[doc_id].chunk_count += 1
+        else:
+            by_doc_id[doc_id] = DocumentSummary(doc_id=doc_id, filename=filename, chunk_count=1)
+
+    return sorted(by_doc_id.values(), key=lambda d: d.filename)
 
 
 def search(collection: str, query: str, top_k: int = 5) -> list[SearchResult]:
