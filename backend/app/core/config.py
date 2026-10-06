@@ -39,6 +39,7 @@ class Settings(BaseSettings):
 
     # --- Weaviate ---
     weaviate_url: str = "http://weaviate:8080"
+    weaviate_api_key: str = ""
 
     # --- Postgres ---
     postgres_host: str = "postgres"

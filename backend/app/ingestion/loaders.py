@@ -12,6 +12,7 @@ exceptions so callers can distinguish "bad input" from "bug":
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -102,6 +103,16 @@ _LOADERS = {
     ".txt": _load_txt,
     ".md": _load_md,
 }
+
+
+def compute_file_hash(content: bytes) -> str:
+    """SHA-256 hex digest of raw file bytes.
+
+    Used as the stable `doc_id` for a file: re-uploading identical content
+    (same bytes, same or different filename) produces the same doc_id, so
+    the vector store layer can detect and skip re-ingesting it.
+    """
+    return hashlib.sha256(content).hexdigest()
 
 
 def load_document(path: str | Path) -> LoadedDocument:
