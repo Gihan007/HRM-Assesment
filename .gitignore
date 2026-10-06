@@ -1,6 +1,7 @@
 # Environment
 .env
 *.env.local
+keys.txt
 
 # Python
 __pycache__/
@@ -20,6 +21,7 @@ env/
 htmlcov/
 .mypy_cache/
 .ruff_cache/
+backend/tests/fixtures/generated/
 
 # Data / uploads / vector + db volumes
 data/

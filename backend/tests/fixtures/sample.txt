@@ -1,0 +1,5 @@
+The quick brown fox jumps over the lazy dog. It was a calm afternoon in the forest. Birds were singing softly in the trees.
+
+A second paragraph begins here. This one talks about something entirely different. The RAG pipeline must chunk this correctly. Sentences should not be split in half.
+
+A short final paragraph.
