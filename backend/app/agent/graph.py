@@ -15,10 +15,13 @@ import logging
 import re
 
 from app.agent.prompts import build_messages
-from app.agent.state import NOT_FOUND_MESSAGE, Citation, QueryResult
+from app.agent.state import CHITCHAT_MESSAGE, NOT_FOUND_MESSAGE, Citation, QueryResult
 from app.core.config import get_settings
 from app.llm import LLMError
 from app.llm import router as llm_router
+from app.retrieval.query_expansion import rewrite_for_retrieval
+from app.retrieval.query_understanding import is_chitchat
+from app.retrieval.reranker import rerank
 from app.retrieval.weaviate_client import search as vector_search
 
 logger = logging.getLogger(__name__)
@@ -41,26 +44,40 @@ def answer_query(
 ) -> QueryResult:
     """Run the full query pipeline and return a grounded, cited answer.
 
-    1. Retrieve `top_k` chunks from `collection`.
-    2. If the best chunk's similarity score is below `similarity_threshold`,
-       return NOT_FOUND_MESSAGE without calling the LLM at all.
-    3. Otherwise build a numbered-sources prompt and generate an answer
+    1. If the question is a greeting/pleasantry with no document-answerable
+       content (see `query_understanding.is_chitchat`), return
+       CHITCHAT_MESSAGE without touching the vector store or the LLM.
+    2. Rewrite the question into a clean, keyword-focused query for
+       retrieval only (see `query_expansion.rewrite_for_retrieval`); the
+       original question is still what's shown to the generation LLM.
+    3. Retrieve a wide candidate pool (`top_k_wide` chunks, hybrid search)
+       from `collection` using the rewritten query, then rerank it down
+       to `top_k` with a local cross-encoder for higher precision.
+    3. If the best chunk's (cross-encoder) score is below
+       `similarity_threshold`, return NOT_FOUND_MESSAGE without calling
+       the LLM at all.
+    4. Otherwise build a numbered-sources prompt and generate an answer
        (Groq primary, OpenRouter fallback), instructing the model to
        answer only from the sources and cite them inline as [n].
-    4. Map cited [n] markers back to real chunk metadata for the
+    5. Map cited [n] markers back to real chunk metadata for the
        `citations` list; marker numbers the model invents (out of range)
        are dropped rather than surfaced as a broken reference.
 
     LLM/API failures (missing key, rate limit, network error) are caught
     and turned into a plain-language answer rather than raising.
     """
+    if is_chitchat(question):
+        return QueryResult(answer=CHITCHAT_MESSAGE, citations=[], retrieved_chunks=[])
+
     settings = get_settings()
     resolved_top_k = top_k if top_k is not None else settings.top_k
     resolved_threshold = (
         similarity_threshold if similarity_threshold is not None else settings.similarity_threshold
     )
 
-    chunks = vector_search(collection, question, top_k=resolved_top_k)
+    retrieval_query = rewrite_for_retrieval(question)
+    wide_chunks = vector_search(collection, retrieval_query, top_k=settings.top_k_wide)
+    chunks = rerank(retrieval_query, wide_chunks, top_k=resolved_top_k)
 
     if not chunks or chunks[0].score < resolved_threshold:
         return QueryResult(answer=NOT_FOUND_MESSAGE, citations=[], retrieved_chunks=chunks)

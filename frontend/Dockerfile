@@ -5,7 +5,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY streamlit_app.py .
+COPY api_client.py streamlit_app.py ./
 
 EXPOSE 8501
 

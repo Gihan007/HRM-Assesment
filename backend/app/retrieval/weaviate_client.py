@@ -260,9 +260,17 @@ def list_documents(collection: str) -> list[DocumentSummary]:
 
 
 def search(collection: str, query: str, top_k: int = 5) -> list[SearchResult]:
-    """Embed `query` and return the top_k most similar chunks in
-    `collection`, each with its metadata and a similarity score in
-    [0, 1] (1 = identical, derived from cosine distance where available).
+    """Embed `query` and return the top_k best-matching chunks in
+    `collection`, each with its metadata and a fused relevance score.
+
+    Uses Weaviate hybrid search (BM25 keyword + vector, fused per
+    `HYBRID_ALPHA`) rather than pure vector search: a short, title-like
+    query (e.g. "the attention is all you need paper") can sit closer in
+    embedding space to a stylistically-similar but topically unrelated
+    chunk than to the chunk that literally contains those keywords.
+    BM25 catches the literal keyword match that the embedding alone
+    misses, while the vector component still carries paraphrased/
+    semantic queries that share no exact wording with the source text.
     """
     sanitized = sanitize_collection_name(collection)
     client = get_client()
@@ -272,24 +280,25 @@ def search(collection: str, query: str, top_k: int = 5) -> list[SearchResult]:
 
     coll = client.collections.get(sanitized)
     query_vector = embed_query(query)
+    settings = get_settings()
 
-    response = coll.query.near_vector(
-        near_vector=query_vector,
+    response = coll.query.hybrid(
+        query=query,
+        vector=query_vector,
+        alpha=settings.hybrid_alpha,
+        # filename is boosted: a noisy/colloquial question that names the
+        # paper (e.g. "the attention all you need paper") often overlaps
+        # the filename more reliably than it does any single chunk of
+        # body text, which otherwise has to win on vector similarity alone.
+        query_properties=["text", "filename^2"],
         limit=top_k,
-        return_metadata=MetadataQuery(distance=True, certainty=True),
+        return_metadata=MetadataQuery(score=True),
     )
 
     results: list[SearchResult] = []
     for obj in response.objects:
         props = obj.properties
-        distance = obj.metadata.distance
-        certainty = obj.metadata.certainty
-        if distance is not None:
-            score = 1.0 - distance
-        elif certainty is not None:
-            score = certainty
-        else:
-            score = 0.0
+        score = obj.metadata.score if obj.metadata.score is not None else 0.0
 
         results.append(
             SearchResult(

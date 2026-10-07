@@ -9,6 +9,10 @@ from dataclasses import dataclass
 from app.retrieval.weaviate_client import SearchResult
 
 NOT_FOUND_MESSAGE = "I couldn't find this in the provided documents."
+CHITCHAT_MESSAGE = (
+    "Hi! I'm a document Q&A assistant for this collection — ask me a question "
+    "about the documents in it and I'll answer using them."
+)
 
 
 @dataclass
